@@ -61,33 +61,41 @@ jobs:
 
       - name: Deploy Canary (10% traffic) or Full Deploy (100%)
         id: deploy_canary
+        env:
+          SERVICE_NAME: ${{ steps.vars.outputs.service_name }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+          IS_FIRST_DEPLOY: ${{ steps.check_service.outputs.is_first_deploy }}
         run: |
-          if [ "${{ steps.check_service.outputs.is_first_deploy }}" = "true" ]; then
+          if [ "$IS_FIRST_DEPLOY" = "true" ]; then
             # Primera vez: Despliegue normal al 100%
-            gcloud run deploy ${{ steps.vars.outputs.service_name }} \
-              --image ${{ steps.vars.outputs.image_tag }} \
+            gcloud run deploy "$SERVICE_NAME" \
+              --image "$IMAGE_TAG" \
               --region ${{ env.GCP_REGION }} \
               --platform managed \
               --allow-unauthenticated \
               --set-env-vars="ENVIRONMENT_NAME=${{ secrets.ENVIRONMENT_NAME }}"
           else
-            # Siguientes veces: Desplegar nueva revisión sin asignarle tráfico inmediato
-            gcloud run deploy ${{ secrets.vars.outputs.service_name }} \
-              --image ${{ steps.vars.outputs.image_tag }} \
+            # Siguientes veces: Desplegar la nueva revisión fijando el tráfico al 10%
+            # Al usar --to-latest-revision=false, Cloud Run mantiene el 100% en la revisión anterior por defecto
+            gcloud run deploy "$SERVICE_NAME" \
+              --image "$IMAGE_TAG" \
               --region ${{ env.GCP_REGION }} \
               --platform managed \
               --allow-unauthenticated \
               --no-traffic \
               --set-env-vars="ENVIRONMENT_NAME=${{ secrets.ENVIRONMENT_NAME }}"
             
-            # Capturar el nombre de la nueva revisión (Canary)
-            CANARY_REV=$(gcloud run services describe ${{ steps.vars.outputs.service_name }} --region ${{ env.GCP_REGION }} --format="value(status.latestReadyRevisionName)")
+            # Capturar el nombre de la nueva revisión recién creada
+            CANARY_REV=$(gcloud run services describe "$SERVICE_NAME" --region ${{ env.GCP_REGION }} --format="value(status.latestReadyRevisionName)")
             echo "canary_revision=$CANARY_REV" >> $GITHUB_OUTPUT
             
-            # SOLUCIÓN AQUÍ: Forzamos la matemática perfecta (90% a la actual estable y 10% a la nueva Canary)
-            gcloud run services update-traffic ${{ steps.vars.outputs.service_name }} \
+            # Conseguir el nombre de la revisión que YA tenía el tráfico antes de este deploy
+            PREVIOUS_REV=$(gcloud run services describe "$SERVICE_NAME" --region ${{ env.GCP_REGION }} --format="value(status.traffic.revisionName)")
+            
+            echo "Asignando tráfico: 90% a la versión anterior ($PREVIOUS_REV) y 10% al Canary ($CANARY_REV)"
+            gcloud run services update-traffic "$SERVICE_NAME" \
               --region ${{ env.GCP_REGION }} \
-              --to-revisions=LATEST=90,$CANARY_REV=10
+              --to-revisions="$PREVIOUS_REV=90,$CANARY_REV=10"
           fi
 
   # 2. JOB DE APROBACIÓN MANUAL
