@@ -86,7 +86,7 @@ jobs:
               --to-revisions="$PREVIOUS_REV=90,$CANARY_REV=10"
           fi
 
-  # 2. JOB DE APROBACIÓN MANUAL
+  # 2. JOB DE APROBACIÓN MANUAL - Crisen
   promote_or_rollback:
     needs: build_and_canary
     if: needs.build_and_canary.outputs.is_first_deploy == 'false'
